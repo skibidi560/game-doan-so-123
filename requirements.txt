@@ -1,5 +1,2 @@
 streamlit
 python-chess
-streamlit-chess
-cairosvg
-
