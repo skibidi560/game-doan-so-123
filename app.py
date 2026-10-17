@@ -1,113 +1,107 @@
 import streamlit as st
 import chess
-import random
-from streamlit_chess import chess_board
+import chess.svg
 
-# 1. Cấu hình giao diện ứng dụng
-st.set_page_config(page_title="Cờ Vua AI Click Chuột", page_icon="🤖", layout="centered")
-st.title("👑 GAME CỜ VUA: ĐIỀU KHIỂN BẰNG CHUỘT")
-st.write("👉 **Hướng dẫn:** Dùng chuột click vào quân cờ của bạn (Trắng) rồi click vào ô muốn đi đến!")
+# 1. Cấu hình giao diện
+st.set_page_config(page_title="Game Cờ Vua Ổn Định", page_icon="👑", layout="centered")
+st.title("👑 GAME CỜ VUA: CHƠI BẰNG ĐIỀU KHIỂN TỌA ĐỘ")
 
-# 2. Khởi tạo bộ nhớ lưu trữ trạng thái ván cờ
-if "board" not in st.session_state:
-    st.session_state.board = chess.Board()
+# Khởi tạo bộ nhớ bàn cờ (sử dụng chuỗi FEN để lưu trạng thái)
+if "board_fen" not in st.session_state:
+    st.session_state.board_fen = chess.Board().fen()
+if "selected_square" not in st.session_state:
+    st.session_state.selected_square = None
 
-# 3. Thanh điều khiển ở cột bên cạnh (Sidebar)
-st.sidebar.header("🛠️ CÀI ĐẶT TRẬN ĐẤU")
-play_mode = st.sidebar.selectbox("Chế độ chơi:", ["Đấu với Máy (AI)", "2 Người chơi (PvP)"])
+# Tải lại bàn cờ hiện tại từ bộ nhớ
+board = chess.Board(st.session_state.board_fen)
 
-difficulty = "Dễ"
-if play_mode == "Đấu với Máy (AI)":
-    difficulty = st.sidebar.select_slider("Mức độ khó của Máy:", options=["Dễ", "Trung bình", "Khó"])
+# Cấu hình thanh Sidebar đấu với Máy
+st.sidebar.header("🛠️ CÀI ĐẶT")
+play_mode = st.sidebar.selectbox("Chế độ:", ["Đấu với Máy (AI)", "2 Người chơi"])
 
-if st.sidebar.button("🔄 Làm mới ván cờ"):
-    st.session_state.board = chess.Board()
+if st.sidebar.button("🔄 Xếp lại bàn cờ"):
+    st.session_state.board_fen = chess.Board().fen()
+    st.session_state.selected_square = None
     st.rerun()
 
-# --- BỘ NÃO AI TÌM NƯỚC ĐI ---
-def evaluate_board(board):
-    piece_values = {
-        chess.PAWN: 10, chess.KNIGHT: 30, chess.BISHOP: 30, 
-        chess.ROOK: 50, chess.QUEEN: 90, chess.KING: 900
-    }
-    score = 0
-    for square in chess.SQUARES:
-        piece = board.piece_at(square)
-        if piece:
-            val = piece_values[piece.piece_type]
-            score += val if piece.color == chess.WHITE else -val
-    return score
+# --- BỘ NÃO MÁY TÍNH (AI) ---
+def make_ai_move(current_board):
+    import random
+    legal_moves = list(current_board.legal_moves)
+    if legal_moves:
+        # Máy quét tìm nước ăn quân tốt nhất ngay lập tức
+        best_move = random.choice(legal_moves)
+        max_score = -1
+        for move in legal_moves:
+            if current_board.is_capture(move):
+                current_board.push(move)
+                if current_board.is_checkmate():
+                    current_board.pop()
+                    return move
+                current_board.pop()
+                best_move = move
+        return best_move
+    return None
 
-def get_ai_move(board, level):
-    legal_moves = list(board.legal_moves)
-    if not legal_moves:
-        return None
-    if level == "Dễ":
-        return random.choice(legal_moves)
+# --- HIỂN THỊ HÌNH ẢNH BÀN CỜ ---
+# Vẽ bàn cờ dạng ảnh sắc nét (Tự động tô màu ô đang chọn)
+fill_dict = {}
+if st.session_state.selected_square:
+    sq_index = chess.parse_square(st.session_state.selected_square)
+    fill_dict[sq_index] = "#ccffcc" # Tô màu xanh ô đang chọn
+
+board_svg = chess.svg.board(board=board, size=420, fill=fill_dict)
+st.image(board_svg, use_container_width=False)
+
+# --- BỘ ĐIỀU KHIỂN TƯƠNG TÁC ---
+if not board.is_game_over():
+    st.write(f"👉 Lượt đi: **{'Quân Trắng (Bạn)' if board.turn == chess.WHITE else 'Quân Đen'}**")
     
-    best_move = random.choice(legal_moves)
-    if level == "Trung bình":
-        best_score = float('inf')
-        for move in legal_moves:
-            board.push(move)
-            score = evaluate_board(board)
-            board.pop()
-            if score < best_score:
-                best_score = score
-                best_move = move
-        return best_move
-        
-    if level == "Khó":
-        best_score = float('inf')
-        for move in legal_moves:
-            board.push(move)
-            if board.is_checkmate():
-                board.pop()
-                return move
-            opp_moves = list(board.legal_moves)
-            max_opp = float('-inf')
-            for opp_move in opp_moves:
-                board.push(opp_move)
-                s = evaluate_board(board)
-                board.pop()
-                if s > max_opp: max_opp = s
-            board.pop()
-            if max_opp < best_score:
-                best_score = max_opp
-                best_move = move
-        return best_move
-
-# 4. HIỂN THỊ BÀN CỜ TƯƠNG TÁC CHUỘT
-# Hàm này tự vẽ bàn cờ và trả về nước đi dạng chữ khi người dùng click chuột xong
-move = chess_board(st.session_state.board.fen(), key="chess_mouse_game")
-
-# 5. XỬ LÝ NƯỚC ĐI TỪ CHUỘT
-if move and not st.session_state.board.is_game_over():
-    try:
-        chess_move = chess.Move.from_uci(move)
-        # Nếu nước đi bằng chuột hợp lệ theo luật cờ vua
-        if chess_move in st.session_state.board.legal_moves:
-            st.session_state.board.push(chess_move)
-            
-            # Nếu đang bật chế độ đấu với máy, cho máy đi luôn
-            if play_mode == "Đấu với Máy (AI)" and not st.session_state.board.is_game_over():
-                with st.spinner("🤖 Máy đang tính toán..."):
-                    ai_move = get_ai_move(st.session_state.board, difficulty)
-                    if ai_move:
-                        st.session_state.board.push(ai_move)
-            
+    # BƯỚC A: CHỌN QUÂN CỜ
+    all_squares = [chess.square_name(s) for s in chess.SQUARES]
+    # Lọc danh sách các ô có quân cờ của mình để người chơi chọn
+    my_pieces_squares = [sq for sq in all_squares if board.piece_at(chess.parse_square(sq)) and board.piece_at(chess.parse_square(sq)).color == board.turn]
+    
+    col1, col2 = st.columns(2)
+    
+    with col1:
+        src_sq = st.selectbox("1. Chọn quân cờ muốn đi:", ["-- Chọn ô --"] + sorted(my_pieces_squares))
+        if src_sq != "-- Chọn ô --" and src_sq != st.session_state.selected_square:
+            st.session_state.selected_square = src_sq
             st.rerun()
-    except Exception:
-        pass
 
-# 6. THÔNG BÁO KẾT THÚC VÁN
-if st.session_state.board.is_game_over():
-    st.markdown("---")
-    st.subheader("🏁 KẾT QUẢ TRẬN ĐẤU")
-    if st.session_state.board.is_checkmate():
-        if st.session_state.board.turn == chess.WHITE:
-            st.error("💀 Máy đã chiến thắng! Bạn đã bị chiếu hết.")
+    # BƯỚC B: CHỌN ĐÍNH ĐẾN VÀ ĐI QUÂN
+    with col2:
+        if st.session_state.selected_square:
+            active_sq = chess.parse_square(st.session_state.selected_square)
+            # Lọc các nước đi hợp lệ từ ô đã chọn
+            possible_destinations = [chess.square_name(m.to_square) for m in board.legal_moves if m.from_square == active_sq]
+            
+            dest_sq = st.selectbox("2. Chọn ô muốn đi tới:", ["-- Chọn đích --"] + sorted(possible_destinations))
+            
+            if st.button("Đi quân ➡️"):
+                if dest_sq != "-- Chọn đích --":
+                    move_str = f"{st.session_state.selected_square}{dest_sq}"
+                    move = chess.Move.from_uci(move_str)
+                    
+                    # Đi quân Trắng
+                    board.push(move)
+                    
+                    # Nếu bật chế độ đấu với Máy, để máy đi luôn quân Đen
+                    if play_mode == "Đấu với Máy (AI)" and not board.is_game_over():
+                        ai_move = make_ai_move(board)
+                        if ai_move:
+                            board.push(ai_move)
+                    
+                    # Lưu trạng thái và đặt lại lựa chọn
+                    st.session_state.board_fen = board.fen()
+                    st.session_state.selected_square = None
+                    st.rerun()
         else:
-            st.success("🎉 Xuất sắc! Bạn đã chiếu hết Máy!")
+            st.info("Hãy chọn quân cờ trước!")
+else:
+    st.subheader("🏁 TRẬN ĐẤU KẾT THÚC!")
+    if board.is_checkmate():
+        st.error("💀 Chiếu tướng kết thúc!")
     else:
-        st.info("🤝 Trận đấu kết thúc với kết quả Hòa!")
+        st.info("🤝 Trận đấu Hòa cờ!")
